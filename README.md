@@ -14,4 +14,23 @@ In our experiments, we tried various combinations of modules. **The final archit
 
 To train the final model, please use the corresponding YAML file and run the standard YOLO training command:
 ```bash
-python train.py --cfg Ablation/YOLO11-Baseline-BiFPN-LSCD.yaml --data multimodal.yaml --epochs 300 ...
+## Dataset Preparation
+Due to GitHub size limits, the datasets are not included. Please download the [DroneVehicle](https://github.com/VisDrone/DroneVehicle) and [M3FD](https://github.com/JinyuanLiu-CV/TarDAL) datasets, and organize them in the following structure:
+
+```text
+SAMA-YOLO/
+├── configs/
+│   ├── dronevehicle.yaml
+│   └── m3fd.yaml
+├── datasets/
+│   ├── DroneVehicle/
+│   │   ├── images/
+│   │   ├── images_ir/
+│   │   ├── labels/
+│   │   └── labels_ir/
+│   └── M3FD/
+│       ├── images/
+│       ├── images_ir/
+│       └── labels/
+├── ultralytics/
+└── train.py
