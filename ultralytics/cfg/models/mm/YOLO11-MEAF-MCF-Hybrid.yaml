@@ -1,0 +1,91 @@
+# YOLOv11-RGBT Hybrid Fusion (MEAF + MCFG + MHCA)
+# 🎯 目标：P4/P5深层注意力对讲 + P2/P3浅层掩码融合
+
+multimodal:
+  Multiple_Input: True
+
+nc: 5 
+
+scales:
+  n: [0.50, 0.25, 1024]
+
+backbone:
+  # ========== RGB 路径 (层 0-10) ==========
+  - [-1, 1, Conv, [64, 3, 2], 'RGB']      # 0
+  - [-1, 1, Conv, [128, 3, 2]]            # 1
+  - [-1, 2, C3k2, [256, False, 0.25]]     # 2: RGB_P2
+  - [-1, 1, Conv, [256, 3, 2]]            # 3
+  - [-1, 2, C3k2, [512, False, 0.25]]     # 4: RGB_P3
+  - [-1, 1, Conv, [512, 3, 2]]            # 5
+  - [-1, 2, C3k2, [512, True]]            # 6: RGB_P4
+  - [-1, 1, Conv, [1024, 3, 2]]           # 7
+  - [-1, 2, C3k2, [1024, True]]           # 8
+  - [-1, 1, SPPF, [1024, 5]]              # 9
+  - [-1, 2, C2PSA, [1024]]                # 10: RGB_P5
+
+  # ========== IR 路径 (层 11-21) ==========
+  - [-1, 1, Conv, [64, 3, 2], 'X']        # 11
+  - [-1, 1, Conv, [128, 3, 2]]            # 12
+  - [-1, 2, C3k2, [256, False, 0.25]]     # 13: IR_P2
+  - [-1, 1, Conv, [256, 3, 2]]            # 14
+  - [-1, 2, C3k2, [512, False, 0.25]]     # 15: IR_P3
+  - [-1, 1, Conv, [512, 3, 2]]            # 16
+  - [-1, 2, C3k2, [512, True]]            # 17: IR_P4
+  - [-1, 1, Conv, [1024, 3, 2]]           # 18
+  - [-1, 2, C3k2, [1024, True]]           # 19
+  - [-1, 1, SPPF, [1024, 5]]              # 20
+  - [-1, 2, C2PSA, [1024]]                # 21: IR_P5
+
+  # ========== 交互与融合 (层 22-35) ==========
+  # 1. P4 级深度对讲 (层 22, 23, 24)
+  - [[6, 17], 1, MultiHeadCrossAttention, [None, 4]]  # 22
+  - [22, 1, Index, [0]]  # 23: RGB_P4_int
+  - [22, 1, Index, [1]]  # 24: IR_P4_int
+
+  # 2. P5 级深度对讲 (层 25, 26, 27)
+  - [[10, 21], 1, MultiHeadCrossAttention, [None, 8]] # 25
+  - [25, 1, Index, [0]]  # 26: RGB_P5_int
+  - [25, 1, Index, [1]]  # 27: IR_P5_int
+
+  # 3. 正式融合逻辑
+  - [[26, 27], 1, MCFGatedFusion, ['add', 3]]       # 28: P5 Fusion
+  - [-1, 2, C3k2, [1024, True]]                     # 29
+
+  - [[23, 24], 1, MCFGatedFusion, ['add', 3]]       # 30: P4 Fusion
+  - [-1, 2, C3k2, [512, True]]                      # 31
+
+  - [[4, 15], 1, MEAF, [512]]                       # 32: P3 Fusion (直接拿骨干网特征，省显存)
+  - [-1, 2, C3k2, [512, False]]                     # 33
+
+  - [[2, 13], 1, MEAF, [256]]                       # 34: P2 Fusion
+  - [-1, 2, C3k2, [256, False]]                     # 35
+
+head:
+  # 自顶向下 PAN
+  - [29, 1, nn.Upsample, [None, 2, "nearest"]]    # 36 (P5 Fused -> P4)
+  - [[-1, 31], 1, Concat, [1]]                    # 37 (连 P4 Fused)
+  - [-1, 2, C3k2, [512, False]]                   # 38 (P4 Neck)
+
+  - [-1, 1, nn.Upsample, [None, 2, "nearest"]]    # 39 (P4 Neck -> P3)
+  - [[-1, 33], 1, Concat, [1]]                    # 40 (连 P3 Fused)
+  - [-1, 2, C3k2, [256, False]]                   # 41 (P3 Neck)
+
+  - [-1, 1, nn.Upsample, [None, 2, "nearest"]]    # 42 (P3 Neck -> P2)
+  - [[-1, 35], 1, Concat, [1]]                    # 43 (连 P2 Fused)
+  - [-1, 2, C3k2, [256, False]]                   # 44 (P2 Small Out)
+
+  # 自底向上 FPN
+  - [44, 1, Conv, [256, 3, 2]]                    # 45 (P2 -> P3)
+  - [[-1, 41], 1, Concat, [1]]                    # 46
+  - [-1, 2, C3k2, [256, False]]                   # 47 (P3 Med Out)
+
+  - [-1, 1, Conv, [256, 3, 2]]                    # 48 (P3 -> P4)
+  - [[-1, 38], 1, Concat, [1]]                    # 49
+  - [-1, 2, C3k2, [512, False]]                   # 50 (P4 Large Out)
+
+  - [-1, 1, Conv, [512, 3, 2]]                    # 51 (P4 -> P5)
+  - [[-1, 29], 1, Concat, [1]]                    # 52
+  - [-1, 2, C3k2, [1024, True]]                   # 53 (P5 Huge Out)
+
+  # 四尺度检测头 [P2, P3, P4, P5]
+  - [[44, 47, 50, 53], 1, Detect_LSCD, [nc]]      # 54

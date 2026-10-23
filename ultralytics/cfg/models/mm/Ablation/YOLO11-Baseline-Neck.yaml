@@ -1,0 +1,84 @@
+# YOLO11 Multi-Modal Baseline Configuration
+# Model: RGB + IR Fusion with Pixel_IAFusion & ResAFF
+
+# YOLO11 Multi-Modal Baseline Configuration
+# Model: RGB + IR Fusion with Pixel_IAFusion & ResAFF
+
+multimodal:
+  Multiple_Input: True
+
+nc: 6 
+scales:
+  n: [0.50, 0.25, 1024] # [depth, width, max_channels]
+
+backbone:
+  # ========== RGB 路径 (层 0-10) ==========
+  - [-1, 1, Conv, [64, 3, 2], 'RGB']      # 0: P1/2
+  - [-1, 1, Conv, [128, 3, 2]]            # 1: P2/4
+  - [-1, 2, C3k2, [256, False, 0.25]]     # 2: RGB_P2
+  - [-1, 1, Conv, [256, 3, 2]]            # 3: P3/8
+  - [-1, 2, C3k2, [512, False, 0.25]]     # 4: RGB_P3
+  - [-1, 1, Conv, [512, 3, 2]]            # 5: P4/16
+  - [-1, 2, C3k2, [512, True]]            # 6: RGB_P4
+  - [-1, 1, Conv, [1024, 3, 2]]           # 7: P5/32
+  - [-1, 2, C3k2, [1024, True]]           # 8
+  - [-1, 1, SPPF, [1024, 5]]              # 9
+  - [-1, 2, C2PSA, [1024]]                # 10: RGB_P5
+
+  # ========== IR 路径 (层 11-21) ==========
+  - [-1, 1, Conv, [64, 3, 2], 'X']        # 11: P1/2 (IR Input)
+  - [-1, 1, Conv, [128, 3, 2]]            # 12: P2/4
+  - [-1, 2, C3k2, [256, False, 0.25]]     # 13: IR_P2
+  - [-1, 1, Conv, [256, 3, 2]]            # 14: P3/8
+  - [-1, 2, C3k2, [512, False, 0.25]]     # 15: IR_P3
+  - [-1, 1, Conv, [512, 3, 2]]            # 16: P4/16
+  - [-1, 2, C3k2, [512, True]]            # 17: IR_P4
+  - [-1, 1, Conv, [1024, 3, 2]]           # 18: P5/32
+  - [-1, 2, C3k2, [1024, True]]           # 19
+  - [-1, 1, SPPF, [1024, 5]]              # 20
+  - [-1, 2, C2PSA, [1024]]                # 21: IR_P5
+
+  # ========== 🚀 跨模态像素级融合 (层 22-29) ==========
+  # 注意：Pixel_IAFusion 内部执行 concat([10, 21])
+  - [[10, 21], 1, Pixel_IAFusion, [256]]  # 22: Fusion P5
+  - [-1, 2, C3k2, [256, True]]            # 23: Fused_P5_Feature
+
+  - [[6, 17], 1, Pixel_IAFusion, [128]]   # 24: Fusion P4
+  - [-1, 2, C3k2, [128, True]]            # 25: Fused_P4_Feature
+
+  - [[4, 15], 1, Pixel_IAFusion, [128]]   # 26: Fusion P3
+  - [-1, 2, C3k2, [128, False]]           # 27: Fused_P3_Feature
+
+  - [[2, 13], 1, Pixel_IAFusion, [64]]    # 28: Fusion P2
+  - [-1, 2, C3k2, [64, False]]            # 29: Fused_P2_Feature
+
+head:
+  # ========== 自顶向下 (Top-Down PAN) ==========
+  - [23, 1, nn.Upsample, [None, 2, "nearest"]]    # 30: P5 -> P4
+  - [[-1, 25], 1, ResAFF, [128]]                  # 31: 融合上采样P5 + Fused_P4
+  - [-1, 2, C3k2, [128, False]]                   # 32: Neck_P4
+
+  - [-1, 1, nn.Upsample, [None, 2, "nearest"]]    # 33: P4 -> P3
+  - [[-1, 27], 1, ResAFF, [128]]                  # 34: 融合上采样P4 + Fused_P3
+  - [-1, 2, C3k2, [128, False]]                   # 35: Neck_P3
+
+  - [-1, 1, nn.Upsample, [None, 2, "nearest"]]    # 36: P3 -> P2
+  - [[-1, 29], 1, ResAFF, [64]]                   # 37: 融合上采样P3 + Fused_P2
+  - [-1, 2, C3k2, [64, False]]                    # 38: Neck_P2 (Small Out)
+
+  # ========== 自底向上 (Bottom-Up PAN) ==========
+  - [-1, 1, Conv, [64, 3, 2]]                     # 39: P2 -> P3
+  - [[-1, 35], 1, ResAFF, [128]]                  # 40: 融合下采样P2 + Neck_P3
+  - [-1, 2, C3k2, [128, False]]                   # 41: Neck_P3 (Medium Out)
+
+  - [-1, 1, Conv, [128, 3, 2]]                    # 42: P3 -> P4
+  - [[-1, 32], 1, ResAFF, [128]]                  # 43: 融合下采样P3 + Neck_P4
+  - [-1, 2, C3k2, [128, False]]                   # 44: Neck_P4 (Large Out)
+
+  - [-1, 1, Conv, [256, 3, 2]]                    # 45: P4 -> P5
+  - [[-1, 23], 1, ResAFF, [256]]                  # 46: 融合下采样P4 + Fused_P5
+  - [-1, 2, C3k2, [256, True]]                    # 47: Neck_P5 (Huge Out)
+
+  # ========== 检测头 (Detect Head) ==========
+  # 输入来自 P2(38), P3(41), P4(44), P5(47)
+  - [[38, 41, 44, 47], 1, Detect_LSCD, [nc]]      # 48: Detect

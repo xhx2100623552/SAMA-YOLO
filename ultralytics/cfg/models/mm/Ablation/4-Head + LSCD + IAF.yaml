@@ -1,0 +1,82 @@
+# Ultralytics YOLOMM 🚀 
+# Ablation Study Variant: 4-Head + LSCD + IAF (Only Illumination-Aware Fusion in shallow layers)
+# 此版本用于专门测试 IAF 模块在四头基线模型上的贡献。
+
+multimodal:
+  Multiple_Input: True
+
+nc: 6 # 假设运行 
+scales:
+  n: [0.50, 0.25, 1024]
+
+backbone:
+  # ========== RGB 路径 (层 0-10) ==========
+  - [-1, 1, Conv, [64, 3, 2], 'RGB']      # 0
+  - [-1, 1, Conv, [128, 3, 2]]            # 1
+  - [-1, 2, C3k2, [256, False, 0.25]]     # 2: RGB_P2
+  - [-1, 1, Conv, [256, 3, 2]]            # 3
+  - [-1, 2, C3k2, [512, False, 0.25]]     # 4: RGB_P3
+  - [-1, 1, Conv, [512, 3, 2]]            # 5
+  - [-1, 2, C3k2, [512, True]]            # 6: RGB_P4
+  - [-1, 1, Conv, [1024, 3, 2]]           # 7
+  - [-1, 2, C3k2, [1024, True]]           # 8
+  - [-1, 1, SPPF, [1024, 5]]              # 9
+  - [-1, 2, C2PSA, [1024]]                # 10: RGB_P5
+
+  # ========== IR 路径 (层 11-21) ==========
+  - [-1, 1, Conv, [64, 3, 2], 'X']        # 11
+  - [-1, 1, Conv, [128, 3, 2]]            # 12
+  - [-1, 2, C3k2, [256, False, 0.25]]     # 13: IR_P2
+  - [-1, 1, Conv, [256, 3, 2]]            # 14
+  - [-1, 2, C3k2, [512, False, 0.25]]     # 15: IR_P3
+  - [-1, 1, Conv, [512, 3, 2]]            # 16
+  - [-1, 2, C3k2, [512, True]]            # 17: IR_P4
+  - [-1, 1, Conv, [1024, 3, 2]]           # 18
+  - [-1, 2, C3k2, [1024, True]]           # 19
+  - [-1, 1, SPPF, [1024, 5]]              # 20
+  - [-1, 2, C2PSA, [1024]]                # 21: IR_P5
+
+  # ========== 多模态融合层 (层 22-29) ==========
+  # 深层 P5 和 P4 保持纯净 Baseline (Concat)
+  - [[10, 21], 1, Concat, [1]]            # 22: P5 Concat
+  - [-1, 2, C3k2, [1024, True]]           # 23: P5 Fused
+
+  - [[6, 17], 1, Concat, [1]]             # 24: P4 Concat
+  - [-1, 2, C3k2, [512, True]]            # 25: P4 Fused
+
+  # 🎯 浅层 P3 和 P2 引入 IAF 进行消融实验
+  - [[4, 15], 1, IAFusion, []]            # 26: P3 替换为光照感知融合
+  - [-1, 2, C3k2, [512, False]]           # 27: P3 Fused
+
+  - [[2, 13], 1, IAFusion, []]            # 28: P2 替换为光照感知融合
+  - [-1, 2, C3k2, [256, False]]           # 29: P2 Fused
+
+head:
+  # 自顶向下 PAN
+  - [23, 1, nn.Upsample, [None, 2, "nearest"]]    # 30
+  - [[-1, 25], 1, Concat, [1]]                    # 31 
+  - [-1, 2, C3k2, [512, False]]                   # 32 (P4 Neck)
+
+  - [-1, 1, nn.Upsample, [None, 2, "nearest"]]    # 33
+  - [[-1, 27], 1, Concat, [1]]                    # 34
+  - [-1, 2, C3k2, [256, False]]                   # 35 (P3 Neck)
+
+  - [-1, 1, nn.Upsample, [None, 2, "nearest"]]    # 36
+  - [[-1, 29], 1, Concat, [1]]                    # 37
+  - [-1, 2, C3k2, [256, False]]                   # 38 (P2 Small Out)
+
+  # 自底向上 FPN
+  - [38, 1, Conv, [256, 3, 2]]                    # 39
+  - [[-1, 35], 1, Concat, [1]]                    # 40
+  - [-1, 2, C3k2, [256, False]]                   # 41 (P3 Med Out)
+
+  - [-1, 1, Conv, [256, 3, 2]]                    # 42
+  - [[-1, 32], 1, Concat, [1]]                    # 43
+  - [-1, 2, C3k2, [512, False]]                   # 44 (P4 Large Out)
+
+  - [-1, 1, Conv, [512, 3, 2]]                    # 45
+  - [[-1, 23], 1, Concat, [1]]                    # 46
+  - [-1, 2, C3k2, [1024, True]]                   # 47 (P5 Huge Out)
+
+  # 四尺度检测头
+  - [[38, 41, 44, 47], 1, Detect_LSCD, [nc]]      # 48
