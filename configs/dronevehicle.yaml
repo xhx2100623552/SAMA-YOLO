@@ -1,0 +1,21 @@
+# DroneVehicle 迷你验证数据集 - 终极标准版
+path: ../datasets/DroneVehicle/DroneVehicle
+
+# 干干净净，绝对不出错
+train: images/train  
+val: images/val      
+test: images/test    
+
+modalities:
+  rgb: images
+  ir: images_ir
+
+models: ["rgb", "ir"]
+
+nc: 5
+names:
+  0: car
+  1: truck
+  2: bus
+  3: van
+  4: freight_car
