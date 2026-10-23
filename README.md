@@ -34,3 +34,7 @@ SAMA-YOLO/
 │       └── labels/
 ├── ultralytics/
 └── train.py
+## Installation
+Ensure you have Python 3.8+ and CUDA installed. Then install the required dependencies:
+```bash
+pip install -r requirements.txt
